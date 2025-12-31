@@ -57,3 +57,4 @@ Sistem iki ana görev (Task) üzerine kuruludur:
 ---
 **Geliştirici:** Efe Kazan
 **Okul:** Adnan Menderes Üniversitesi - Bilgisayar Mühendisliği
+Proje Tanıtım Videosu=https://youtu.be/ytQfuZpMm0c
