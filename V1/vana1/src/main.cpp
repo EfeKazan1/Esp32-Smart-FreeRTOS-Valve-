@@ -119,21 +119,22 @@ TaskHandle_t task1;
 
 TaskHandle_t task2;
 
-QueueHandle_t sicaklikqueue;
+QueueHandle_t xSicaklikQueue;
 
-QueueHandle_t casequeue;
+QueueHandle_t xKomutQueue;
 
-QueueHandle_t hedefsicaklikqueue;
+QueueHandle_t xHedefSicaklikQueue;
 
-uint8_t durum = 0; // 0000 0000
+uint8_t systemState = 0; // 8-bit durum registerı
 
-#define OTOMATIK (1<<0) // 0000 0001
+//Bit-Maskeleme
+#define OTOMATIK (1<<0) // 0000 0001:OTOMATIK MOD
 
-#define MANUEL (1<<1) // 0000 0010
+#define MANUEL (1<<1) // 0000 0010:MANUEL MOD
 
-#define ANAEKRAN (1<<2) // 0000 0100
+#define ANAEKRAN (1<<2) // 0000 0100:ANAEKRAN MODU
 
-#define SICAKLIKAYARLAMA (1<<3) //0000 1000
+#define SICAKLIKAYARLAMA (1<<3) //0000 1000:SICAKLIK AYARLAMA MODU
 
 Servo myservo;
 
@@ -345,17 +346,17 @@ void setup() {
 
   Serial.begin(115200);
 
-  sicaklikqueue=xQueueCreate(1,sizeof(Sensor));
+  xSicaklikQueue=xQueueCreate(1,sizeof(Sensor));
 
-  casequeue=xQueueCreate(1,sizeof(State_Machine));
+  xKomutQueue=xQueueCreate(1,sizeof(State_Machine));
 
-  hedefsicaklikqueue=xQueueCreate(1,sizeof(float));
+  xHedefSicaklikQueue=xQueueCreate(1,sizeof(float));
 
   SicaklikSensor.sensorId=1;
   
   pinler.begin(&myservo);
 
-  durum=loadSettings();
+  systemState=loadSettings();
 
   case1=(State_Machine)loadCase();//tür değiştirme
 
@@ -422,7 +423,7 @@ void TaskVana(void *pvParameters){
 
       SicaklikSensor.sensorValue=tempayar(&pinler); //18 derece 
 
-      xQueueOverwrite(sicaklikqueue,&SicaklikSensor);
+      xQueueOverwrite(xSicaklikQueue,&SicaklikSensor);
 
       sonsicaklikokuma=suanki_zaman;
 
@@ -432,14 +433,14 @@ void TaskVana(void *pvParameters){
 
     State_Machine gelenvana;
 
-    if(xQueueReceive(casequeue,&gelenvana,0)==pdTRUE){
+    if(xQueueReceive(xKomutQueue,&gelenvana,0)==pdTRUE){
       
       case1=gelenvana;
 
     }
     float webhedefi=0.0;
 
-    if(xQueueReceive(hedefsicaklikqueue,&webhedefi,0)==pdTRUE){
+    if(xQueueReceive(xHedefSicaklikQueue,&webhedefi,0)==pdTRUE){
       
         genelhedef=webhedefi;
 
@@ -455,24 +456,24 @@ void TaskVana(void *pvParameters){
 
           lcd.clear();
 
-          if(durum & ANAEKRAN){
-            durum&=~ANAEKRAN;
-            durum|=SICAKLIKAYARLAMA;
+          if(systemState & ANAEKRAN){
+            systemState&=~ANAEKRAN;
+            systemState|=SICAKLIKAYARLAMA;
             gecici = genelhedef;
         
           }
           else{
-            durum&=~SICAKLIKAYARLAMA;
-            durum|=ANAEKRAN;
+            systemState&=~SICAKLIKAYARLAMA;
+            systemState|=ANAEKRAN;
             genelhedef = gecici;
             saveGoal(genelhedef);
 
           }
           onceki_zaman=suanki_zaman;
-          saveSettings(durum);
+          saveSettings(systemState);
     
       }
-      if(digitalRead(pinler.getArtr())==LOW && (durum & SICAKLIKAYARLAMA)){
+      if(digitalRead(pinler.getArtr())==LOW && (systemState & SICAKLIKAYARLAMA)){
 
         gecici++;
 
@@ -480,7 +481,7 @@ void TaskVana(void *pvParameters){
         
       }
 
-      else if(digitalRead(pinler.getAzalt())==LOW && (durum & SICAKLIKAYARLAMA)){
+      else if(digitalRead(pinler.getAzalt())==LOW && (systemState & SICAKLIKAYARLAMA)){
         gecici--;
 
         onceki_zaman=suanki_zaman;
@@ -489,7 +490,7 @@ void TaskVana(void *pvParameters){
     }
     
 
-    if(durum & SICAKLIKAYARLAMA){
+    if(systemState & SICAKLIKAYARLAMA){
 
       lcd.setCursor(0, 1);
       lcd.print("Set: ");
@@ -504,7 +505,7 @@ void TaskVana(void *pvParameters){
         
     }
 
-    if(durum & OTOMATIK){ //0000 0010 & 0000 0010 // 0000 0001 & 0000 0010 
+    if(systemState & OTOMATIK){ //0000 0010 & 0000 0010 // 0000 0001 & 0000 0010 
 
       if(SicaklikSensor.sensorValue>=genelhedef){
         case1=KAPALI;
@@ -567,7 +568,7 @@ void TaskWiFi(void *pvParameters){
   sunucu.on("/sicaklik_oku",HTTP_GET,[](){
     Sensor wifisicaklik;
 
-    if(xQueueReceive(sicaklikqueue,&wifisicaklik,0)==pdTRUE && wifisicaklik.sensorId==1){ 
+    if(xQueueReceive(xSicaklikQueue,&wifisicaklik,0)==pdTRUE && wifisicaklik.sensorId==1){ 
 
         sunucu.send(200,"text/plain",String(wifisicaklik.sensorValue));
       
@@ -589,7 +590,7 @@ void TaskWiFi(void *pvParameters){
 
         if(hedefsicaklik>15 && hedefsicaklik<40){
 
-          xQueueOverwrite(hedefsicaklikqueue,&hedefsicaklik);
+          xQueueOverwrite(xHedefSicaklikQueue,&hedefsicaklik);
 
           sunucu.send(200, "text/plain", "AYARLANDI: " + String(hedefsicaklik));
         } 
@@ -610,12 +611,12 @@ void TaskWiFi(void *pvParameters){
 
   sunucu.on("/mod_oto",HTTP_GET,[](){
 
-    if(durum&MANUEL){//eğer manueldeyse ve otoya basıldıysa mod manuel olsun
+    if(systemState&MANUEL){//eğer manueldeyse ve otoya basıldıysa mod manuel olsun
 
-      durum&=~MANUEL; //0000 0001 & 1111 1110 = 0000 0000 
-      durum|=OTOMATIK; //0000 0000 | 0000 0010 = 0000 0010 = otomatik 
+      systemState&=~MANUEL; //0000 0001 & 1111 1110 = 0000 0000 
+      systemState|=OTOMATIK; //0000 0000 | 0000 0010 = 0000 0010 = otomatik 
       sunucu.send(200,"text/plain","OTOMATIGE GECILDI");
-      saveSettings(durum);
+      saveSettings(systemState);
     }
     else{
       sunucu.send(200,"text/html","ZATEN OTODA");
@@ -626,12 +627,12 @@ void TaskWiFi(void *pvParameters){
 
   sunucu.on("/mod_manuel",HTTP_GET,[](){
 
-    if(durum&OTOMATIK){
+    if(systemState&OTOMATIK){
 
-      durum&=~OTOMATIK;
-      durum|=MANUEL;
+      systemState&=~OTOMATIK;
+      systemState|=MANUEL;
       sunucu.send(200,"text/plain","MANUELE GECILDI");
-      saveSettings(durum);
+      saveSettings(systemState);
     }
     else{
       sunucu.send(200,"text/html","ZATEN MANUELDE");
@@ -642,9 +643,9 @@ void TaskWiFi(void *pvParameters){
 
   sunucu.on("/vana_ac",HTTP_GET,[](){
 
-    if(durum&MANUEL){
+    if(systemState&MANUEL){
       State_Machine vana=ACIK;
-      xQueueOverwrite(casequeue,&vana);
+      xQueueOverwrite(xKomutQueue,&vana);
       sunucu.send(200,"text/plain","VANA ACIK");
 
     }
@@ -656,9 +657,9 @@ void TaskWiFi(void *pvParameters){
 
   sunucu.on("/vana_kapat",HTTP_GET,[](){
 
-    if(durum&MANUEL){
+    if(systemState&MANUEL){
       State_Machine vana=KAPALI;
-      xQueueOverwrite(casequeue,&vana);
+      xQueueOverwrite(xKomutQueue,&vana);
       sunucu.send(200,"text/plain","VANA KAPALI");
 
     }
@@ -731,11 +732,11 @@ void servoKapali(Servo *motor){
 
 }
 
-void saveSettings(uint8_t durum){
+void saveSettings(uint8_t systemState){
 
   mypreferences.begin("vana",false);
 
-  mypreferences.putUChar("durum",durum); 
+  mypreferences.putUChar("durum",systemState); 
 
   mypreferences.end();
 
